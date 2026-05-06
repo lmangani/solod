@@ -6,6 +6,7 @@ Solod provides a growing set of high-level packages similar to Go's stdlib, and 
 [bytes](#sobytes) •
 [c](#soc) •
 [cmp](#socmp) •
+[duckdb](#soduckdb) •
 [crypto/crand](#socryptocrand) •
 [encoding/binary](#soencodingbinary) •
 [errors](#soerrors) •
@@ -107,6 +108,25 @@ Types:
 
 - `Func` is a comparison function `func(a, b any) int`.
 - `FuncFor` returns the appropriate comparison function for type T.
+
+## [so/duckdb](https://pkg.go.dev/solod.dev/so/duckdb)
+
+Native DuckDB integration built on DuckDB's C API. Provides explicit resource lifecycles for connections, prepared statements, and result sets.
+
+Functions:
+
+- `Open(path)` opens a DuckDB database and returns a `Conn`.
+
+Types:
+
+- `Conn` manages the database and active connection.
+- `Stmt` is a prepared statement with typed bind methods (`BindNull`, `BindBool`, `BindInt64`, `BindFloat64`, `BindString`).
+- `Result` owns a materialized result set and provides typed value readers.
+- `Rows` provides row-wise iteration over a `Result`.
+
+Memory ownership:
+
+- `Result.StringCopy` and `Rows.StringCopy` return owned strings cloned with a caller-provided allocator; free them with `mem.FreeString`.
 
 ## [so/crypto/crand](https://pkg.go.dev/solod.dev/so/crypto/crand)
 
