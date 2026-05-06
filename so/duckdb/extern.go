@@ -24,13 +24,35 @@ func so_duckdb_open(path string, out *dbHandle) int {
 }
 
 //so:extern
+func so_duckdb_open_memory(out *dbHandle) int {
+	_ = out
+	return 0
+}
+
+//so:extern
 func so_duckdb_close(db *dbHandle) {
 	_ = db
 }
 
 //so:extern
+func so_duckdb_interrupt(db *dbHandle) {
+	_ = db
+}
+
+//so:extern
+func so_duckdb_library_version() *c.ConstChar {
+	return nil
+}
+
+//so:extern
 func so_duckdb_query(db *dbHandle, query string, out *resultHandle) int {
 	_, _, _ = db, query, out
+	return 0
+}
+
+//so:extern
+func so_duckdb_query_void(db *dbHandle, query string) int {
+	_, _ = db, query
 	return 0
 }
 
@@ -105,6 +127,18 @@ func so_duckdb_result_error(res *resultHandle) *c.ConstChar {
 }
 
 //so:extern
+func so_duckdb_result_error_type(res *resultHandle) int32 {
+	_ = res
+	return 0
+}
+
+//so:extern
+func so_duckdb_result_statement_type(res *resultHandle) int32 {
+	_ = res
+	return 0
+}
+
+//so:extern
 func so_duckdb_result_row_count(res *resultHandle) int {
 	_ = res
 	return 0
@@ -126,6 +160,35 @@ func so_duckdb_result_column_count(res *resultHandle) int {
 func so_duckdb_result_column_name(res *resultHandle, col int) *c.ConstChar {
 	_, _ = res, col
 	return nil
+}
+
+//so:extern
+func so_duckdb_column_type(res *resultHandle, col int) int32 {
+	_, _ = res, col
+	return 0
+}
+
+//so:extern
+func so_duckdb_column_data(res *resultHandle, col int) any {
+	_, _ = res, col
+	return nil
+}
+
+//so:extern
+func so_duckdb_nullmask_data(res *resultHandle, col int) any {
+	_, _ = res, col
+	return nil
+}
+
+//so:extern
+func so_duckdb_column_logical_type(res *resultHandle, col int) any {
+	_, _ = res, col
+	return nil
+}
+
+//so:extern
+func so_duckdb_logical_type_destroy(lt any) {
+	_ = lt
 }
 
 //so:extern

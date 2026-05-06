@@ -1,7 +1,17 @@
 // Package duckdb provides native DuckDB integration for Solod.
 //
 // This package is designed around DuckDB's C API with explicit resource
-// ownership and predictable lifecycles.
+// ownership and predictable lifecycles. Query execution follows duckdb_query
+// semantics: after any call that fills a result object, Result.Close must run
+// even when the query fails, so errors attached to the result are released correctly.
+//
+// Follow the DuckDB C overview flow (install libduckdb, use duckdb.h): open a database,
+// connect, run queries, disconnect and close. See:
+//   - https://duckdb.org/docs/current/clients/c/overview
+//   - https://duckdb.org/docs/current/clients/c/connect
+//
+// Query/result details align with:
+// https://duckdb.org/docs/current/clients/c/query
 //
 // Building translated programs that import this package requires DuckDB headers
 // and library to be available to the C compiler and linker (e.g. `-lduckdb`).
@@ -71,12 +81,33 @@ type Rows struct {
 	row    int
 }
 
-// Open creates a new DuckDB connection.
+// LibraryVersion returns duckdb_library_version() (e.g. "v1.5.2").
+// The string is owned by DuckDB; do not free it.
+func LibraryVersion() string {
+	p := so_duckdb_library_version()
+	if p == nil {
+		return ""
+	}
+	return c.String(p)
+}
+
+// Open creates a new DuckDB database handle and connection from a path string.
+// Use a file path for an on-disk database or ":memory:" for an in-memory database string path.
 //
-// Use ":memory:" for in-memory databases.
+// For the same in-memory setup as the C examples using duckdb_open(NULL), use [OpenInMemory].
 func Open(path string) (Conn, error) {
 	var db dbHandle
 	if so_duckdb_open(path, &db) != 0 {
+		return Conn{}, ErrOpen
+	}
+	return Conn{db: db}, nil
+}
+
+// OpenInMemory opens an ephemeral database using duckdb_open(NULL) and duckdb_connect,
+// matching the Startup & Shutdown C examples.
+func OpenInMemory() (Conn, error) {
+	var db dbHandle
+	if so_duckdb_open_memory(&db) != 0 {
 		return Conn{}, ErrOpen
 	}
 	return Conn{db: db}, nil
@@ -92,26 +123,55 @@ func (c *Conn) Close() error {
 	return nil
 }
 
+// Interrupt requests interruption of the current query on this connection (duckdb_interrupt).
+func (c *Conn) Interrupt() {
+	if c.closed {
+		return
+	}
+	so_duckdb_interrupt(&c.db)
+}
+
 // Query executes SQL and returns a materialized result set.
+//
+// If the returned error is non-nil, the [Result] still wraps the DuckDB result
+// object (including error details); the caller must call [Result.Close].
 func (c *Conn) Query(query string) (Result, error) {
 	if c.closed {
 		return Result{}, ErrClosed
 	}
 	var res resultHandle
-	if so_duckdb_query(&c.db, query, &res) != 0 {
-		return Result{}, ErrQuery
+	rc := so_duckdb_query(&c.db, query, &res)
+	out := Result{res: res}
+	if rc != 0 {
+		return out, ErrQuery
 	}
-	return Result{res: res}, nil
+	return out, nil
 }
 
 // Exec executes SQL and returns the number of changed rows.
 func (c *Conn) Exec(query string) (int, error) {
 	res, err := c.Query(query)
 	if err != nil {
+		_ = res.Close()
 		return 0, err
 	}
-	defer res.Close()
-	return res.RowsChanged(), nil
+	n := res.RowsChanged()
+	closeErr := res.Close()
+	return n, closeErr
+}
+
+// ExecSQL runs SQL without retaining a result set (duckdb_query with a NULL result pointer).
+// Use this for DDL or statements where row metadata is not needed.
+//
+// Errors return [ErrQuery] without an error message; use [Conn.Query] when diagnostics are required.
+func (c *Conn) ExecSQL(sql string) error {
+	if c.closed {
+		return ErrClosed
+	}
+	if so_duckdb_query_void(&c.db, sql) != 0 {
+		return ErrQuery
+	}
+	return nil
 }
 
 // Prepare creates a prepared statement.
@@ -203,25 +263,31 @@ func (s *Stmt) BindString(index int, value string) error {
 }
 
 // Query executes the prepared statement and returns a result set.
+//
+// If the returned error is non-nil, the [Result] still must be closed.
 func (s *Stmt) Query() (Result, error) {
 	if s.closed {
 		return Result{}, ErrClosed
 	}
 	var res resultHandle
-	if so_duckdb_stmt_exec(&s.stmt, &res) != 0 {
-		return Result{}, ErrExec
+	rc := so_duckdb_stmt_exec(&s.stmt, &res)
+	out := Result{res: res}
+	if rc != 0 {
+		return out, ErrExec
 	}
-	return Result{res: res}, nil
+	return out, nil
 }
 
 // Exec executes the prepared statement and returns changed row count.
 func (s *Stmt) Exec() (int, error) {
 	res, err := s.Query()
 	if err != nil {
+		_ = res.Close()
 		return 0, err
 	}
-	defer res.Close()
-	return res.RowsChanged(), nil
+	n := res.RowsChanged()
+	closeErr := res.Close()
+	return n, closeErr
 }
 
 // PrepareError returns the latest prepare error for this statement.
@@ -244,12 +310,30 @@ func (r *Result) Close() error {
 }
 
 // Error returns the result-level error message, if any.
+//
+// The pointer is owned by DuckDB; do not free it. It is valid until [Result.Close].
 func (r *Result) Error() string {
 	msg := so_duckdb_result_error(&r.res)
 	if msg == nil {
 		return ""
 	}
 	return c.String(msg)
+}
+
+// ErrorType returns the error classification when [Conn.Query] failed.
+func (r *Result) ErrorType() ErrorType {
+	if r.closed {
+		return ErrorInvalid
+	}
+	return ErrorType(so_duckdb_result_error_type(&r.res))
+}
+
+// StatementType returns the statement type that produced this result.
+func (r *Result) StatementType() StatementType {
+	if r.closed {
+		return StatementInvalid
+	}
+	return StatementType(so_duckdb_result_statement_type(&r.res))
 }
 
 // RowCount returns the number of rows in this result.
@@ -277,6 +361,58 @@ func (r *Result) ColumnName(col int) (string, error) {
 		return "", ErrInvalidCol
 	}
 	return c.String(name), nil
+}
+
+// ColumnType returns the physical SQL type of column col (see [ColType] constants).
+func (r *Result) ColumnType(col int) (ColType, error) {
+	if r.closed {
+		return ColInvalid, ErrQuery
+	}
+	if col < 0 || col >= r.ColumnCount() {
+		return ColInvalid, ErrInvalidCol
+	}
+	return ColType(so_duckdb_column_type(&r.res, col)), nil
+}
+
+// ColumnData returns duckdb_column_data: a pointer to columnar data for col.
+// Layout depends on [Result.ColumnType] / [ColType]; see DuckDB C documentation.
+func (r *Result) ColumnData(col int) any {
+	if r.closed || col < 0 || col >= r.ColumnCount() {
+		return nil
+	}
+	return so_duckdb_column_data(&r.res, col)
+}
+
+// NullmaskData returns duckdb_nullmask_data for col, or nil if unavailable.
+func (r *Result) NullmaskData(col int) any {
+	if r.closed || col < 0 || col >= r.ColumnCount() {
+		return nil
+	}
+	return so_duckdb_nullmask_data(&r.res, col)
+}
+
+// ColumnLogicalType returns an opaque duckdb_logical_type handle for col (see DuckDB C docs).
+// Release it with [DestroyLogicalType].
+func (r *Result) ColumnLogicalType(col int) (any, error) {
+	if r.closed {
+		return nil, ErrQuery
+	}
+	if col < 0 || col >= r.ColumnCount() {
+		return nil, ErrInvalidCol
+	}
+	h := so_duckdb_column_logical_type(&r.res, col)
+	if h == nil {
+		return nil, ErrInvalidCol
+	}
+	return h, nil
+}
+
+// DestroyLogicalType destroys a handle returned by [Result.ColumnLogicalType].
+func DestroyLogicalType(lt any) {
+	if lt == nil {
+		return
+	}
+	so_duckdb_logical_type_destroy(lt)
 }
 
 // IsNull reports whether a value at (row, col) is null.

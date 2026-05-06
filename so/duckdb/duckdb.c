@@ -1,7 +1,7 @@
 //go:build ignore
 #include "duckdb.h"
 
-int so_duckdb_open(const char* path, so_duckdb_db* out) {
+static int so_duckdb_open_impl(const char* path, so_duckdb_db* out) {
     if (!out) {
         return 1;
     }
@@ -20,6 +20,14 @@ int so_duckdb_open(const char* path, so_duckdb_db* out) {
     return 0;
 }
 
+int so_duckdb_open(const char* path, so_duckdb_db* out) {
+    return so_duckdb_open_impl(path, out);
+}
+
+int so_duckdb_open_memory(so_duckdb_db* out) {
+    return so_duckdb_open_impl(NULL, out);
+}
+
 void so_duckdb_close(so_duckdb_db* db) {
     if (!db || !db->open) {
         return;
@@ -29,16 +37,31 @@ void so_duckdb_close(so_duckdb_db* db) {
     db->open = false;
 }
 
+void so_duckdb_interrupt(so_duckdb_db* db) {
+    if (!db || !db->open) {
+        return;
+    }
+    duckdb_interrupt(db->conn);
+}
+
+const char* so_duckdb_library_version(void) {
+    return duckdb_library_version();
+}
+
 int so_duckdb_query(so_duckdb_db* db, const char* query, so_duckdb_result* out) {
     if (!db || !db->open || !out) {
         return 1;
     }
-    out->open = false;
-    if (duckdb_query(db->conn, query, &out->result) != DuckDBSuccess) {
+    duckdb_state st = duckdb_query(db->conn, query, &out->result);
+    out->open = true;
+    return st == DuckDBSuccess ? 0 : 1;
+}
+
+int so_duckdb_query_void(so_duckdb_db* db, const char* query) {
+    if (!db || !db->open) {
         return 1;
     }
-    out->open = true;
-    return 0;
+    return duckdb_query(db->conn, query, NULL) == DuckDBSuccess ? 0 : 1;
 }
 
 int so_duckdb_prepare(so_duckdb_db* db, const char* query, so_duckdb_stmt* out) {
@@ -115,12 +138,9 @@ int so_duckdb_stmt_exec(so_duckdb_stmt* stmt, so_duckdb_result* out) {
     if (!stmt || !stmt->open || !out) {
         return 1;
     }
-    out->open = false;
-    if (duckdb_execute_prepared(stmt->stmt, &out->result) != DuckDBSuccess) {
-        return 1;
-    }
+    duckdb_state st = duckdb_execute_prepared(stmt->stmt, &out->result);
     out->open = true;
-    return 0;
+    return st == DuckDBSuccess ? 0 : 1;
 }
 
 void so_duckdb_result_close(so_duckdb_result* res) {
@@ -136,6 +156,20 @@ const char* so_duckdb_result_error(so_duckdb_result* res) {
         return NULL;
     }
     return duckdb_result_error(&res->result);
+}
+
+int32_t so_duckdb_result_error_type(so_duckdb_result* res) {
+    if (!res || !res->open) {
+        return 0;
+    }
+    return (int32_t)duckdb_result_error_type(&res->result);
+}
+
+int32_t so_duckdb_result_statement_type(so_duckdb_result* res) {
+    if (!res || !res->open) {
+        return 0;
+    }
+    return (int32_t)duckdb_result_statement_type(res->result);
 }
 
 int so_duckdb_result_row_count(so_duckdb_result* res) {
@@ -164,6 +198,39 @@ const char* so_duckdb_result_column_name(so_duckdb_result* res, int col) {
         return NULL;
     }
     return duckdb_column_name(&res->result, (idx_t)col);
+}
+
+int32_t so_duckdb_column_type(so_duckdb_result* res, int col) {
+    if (!res || !res->open || col < 0) {
+        return (int32_t)DUCKDB_TYPE_INVALID;
+    }
+    return (int32_t)duckdb_column_type(&res->result, (idx_t)col);
+}
+
+void* so_duckdb_column_data(so_duckdb_result* res, int col) {
+    if (!res || !res->open || col < 0) {
+        return NULL;
+    }
+    return duckdb_column_data(&res->result, (idx_t)col);
+}
+
+bool* so_duckdb_nullmask_data(so_duckdb_result* res, int col) {
+    if (!res || !res->open || col < 0) {
+        return NULL;
+    }
+    return duckdb_nullmask_data(&res->result, (idx_t)col);
+}
+
+duckdb_logical_type so_duckdb_column_logical_type(so_duckdb_result* res, int col) {
+    if (!res || !res->open || col < 0) {
+        return NULL;
+    }
+    return duckdb_column_logical_type(&res->result, (idx_t)col);
+}
+
+void so_duckdb_logical_type_destroy(duckdb_logical_type lt) {
+    duckdb_logical_type local = lt;
+    duckdb_destroy_logical_type(&local);
 }
 
 bool so_duckdb_value_is_null(so_duckdb_result* res, int col, int row) {

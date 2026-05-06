@@ -7,14 +7,21 @@ import (
 )
 
 func main() {
-	db, err := duckdb.Open(":memory:")
+	libVer := duckdb.LibraryVersion()
+	if len(libVer) == 0 {
+		panic("library version empty")
+	}
+	println("duckdb library:", libVer)
+
+	db, err := duckdb.OpenInMemory()
 	if err != nil {
 		panic("duckdb open failed")
 	}
 	defer db.Close()
+	db.Interrupt()
 
 	{
-		// Smoke-test query path.
+		// Smoke-test query path (duckdb_query + result metadata).
 		res, err := db.Query("SELECT version()")
 		if err != nil {
 			panic("duckdb query failed")
@@ -27,6 +34,21 @@ func main() {
 		if res.ColumnCount() != 1 {
 			panic("expected one column")
 		}
+		if res.StatementType() != duckdb.StatementSelect {
+			panic("expected SELECT statement type")
+		}
+		typ, err := res.ColumnType(0)
+		if err != nil {
+			panic("column type failed")
+		}
+		if typ != duckdb.ColVarchar {
+			panic("expected VARCHAR column")
+		}
+		lt, err := res.ColumnLogicalType(0)
+		if err != nil {
+			panic("logical type failed")
+		}
+		duckdb.DestroyLogicalType(lt)
 
 		name, err := res.ColumnName(0)
 		if err != nil {
@@ -51,8 +73,20 @@ func main() {
 	}
 
 	{
+		// Failed query: duckdb_query fills error state; Result.Close must still run.
+		badRes, err := db.Query("SELECT * FROM duckdb_missing_table_so_test_xx")
+		defer badRes.Close()
+		if err == nil {
+			panic("expected query error")
+		}
+		if badRes.Error() == "" {
+			panic("expected error message on failed result")
+		}
+	}
+
+	{
 		// Prepared statements + typed binds/reads.
-		_, err := db.Exec("CREATE TABLE people(id BIGINT, name VARCHAR, score DOUBLE)")
+		err := db.ExecSQL("CREATE TABLE people(id BIGINT, name VARCHAR, score DOUBLE)")
 		if err != nil {
 			panic("create table failed")
 		}
@@ -110,6 +144,14 @@ func main() {
 
 		if rowsRes.RowCount() != 2 {
 			panic("expected two rows")
+		}
+		idCol := rowsRes.ColumnData(0)
+		if idCol == nil {
+			panic("expected column data pointer")
+		}
+		nm := rowsRes.NullmaskData(0)
+		if nm == nil {
+			panic("expected nullmask pointer")
 		}
 
 		rows := rowsRes.Rows()
