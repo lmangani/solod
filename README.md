@@ -212,6 +212,10 @@ Supported platforms: amd64, arm64, and riscv64. 32-bit targets are not supported
 
 🤔 Full Windows support.
 
+## DuckDB example (soloduck)
+
+The optional submodule [soloduck](https://github.com/lmangani/soloduck) is a small DuckDB shell written in So and linked against libduckdb, demonstrating [`so/duckdb`](so/duckdb/). Clone it with the rest of the submodules (`git submodule update --init soloduck`) and follow that directory’s README to build.
+
 ## Contributing
 
 Bug fixes are welcome. For anything other than bug fixes, please open an issue first to discuss your proposed changes. To prevent feature bloat, it's important to discuss any new features before adding them.
