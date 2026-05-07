@@ -6,7 +6,6 @@ Solod provides a growing set of high-level packages similar to Go's stdlib, and 
 [bytes](#sobytes) •
 [c](#soc) •
 [cmp](#socmp) •
-[duckdb](#soduckdb) •
 [crypto/crand](#socryptocrand) •
 [encoding/binary](#soencodingbinary) •
 [errors](#soerrors) •
@@ -108,33 +107,6 @@ Types:
 
 - `Func` is a comparison function `func(a, b any) int`.
 - `FuncFor` returns the appropriate comparison function for type T.
-
-## [so/duckdb](https://pkg.go.dev/solod.dev/so/duckdb)
-
-Native DuckDB integration built on DuckDB’s C API (`duckdb.h`), following the [C overview](https://duckdb.org/docs/current/clients/c/overview) and [startup/shutdown](https://duckdb.org/docs/current/clients/c/connect) lifecycle (`duckdb_open`, `duckdb_connect`, `duckdb_disconnect`, `duckdb_close`). Install **libduckdb** for your platform and link with `-lduckdb` when compiling translated C (see the [libduckdb installation page](https://duckdb.org/install/?environment=c)).
-
-Query and result handling follow the [Query](https://duckdb.org/docs/current/clients/c/query) documentation (`duckdb_query`, `duckdb_destroy_result`, column introspection, raw column data, logical types). DuckDB’s SQLite-compatible C shim for relinking SQLite apps is **not** exposed here; use the native API through this package instead.
-
-Functions:
-
-- `LibraryVersion` wraps `duckdb_library_version`.
-- `Open(path)` opens with `duckdb_open(path)` plus `duckdb_connect` (use a file path or `":memory:"` as a path string).
-- `OpenInMemory` matches `duckdb_open(NULL)` plus `duckdb_connect` from the C startup examples.
-- `DestroyLogicalType` releases a handle from `Result.ColumnLogicalType`.
-
-Types:
-
-- `Conn` manages the database and active connection (`Query`, `Exec`, `ExecSQL`, `Prepare`, `Interrupt`).
-- `Stmt` is a prepared statement with typed bind methods (`BindNull`, `BindBool`, `BindInt64`, `BindFloat64`, `BindString`).
-- `Result` owns a materialized result set (`RowCount`, `ColumnCount`, `ColumnName`, `ColumnType`, `StatementType`, `Error`, `ErrorType`, `ColumnData`, `NullmaskData`, `ColumnLogicalType`, typed value readers).
-- `Rows` provides row-wise iteration over a `Result`.
-- `ColType`, `StatementType`, and `ErrorType` mirror DuckDB C enums (`ColType` avoids a name clash with DuckDB’s `duckdb_type` in generated C).
-
-Memory ownership:
-
-- `Result.StringCopy` and `Rows.StringCopy` return owned strings cloned with a caller-provided allocator; free them with `mem.FreeString`.
-- After `Conn.Query` or `Stmt.Query`, always call `Result.Close`, including when an error is returned (matches DuckDB’s requirement to call `duckdb_destroy_result` after failed queries).
-- Logical types from `ColumnLogicalType` must be destroyed with `DestroyLogicalType`.
 
 ## [so/crypto/crand](https://pkg.go.dev/solod.dev/so/crypto/crand)
 
